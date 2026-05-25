@@ -22,9 +22,7 @@ let currentCallback = null;
 let currentErrorCallback = null;
 let currentTranscriptCallback = null;
 let pendingStart = false;
-// Note: processedIndices Set removed — it was used to deduplicate interim
-// results, but since we now only process final results (isFinal === true),
-// each index fires exactly once as final and deduplication is unnecessary.
+const processedIndices = new Set();
 
 // Pre-sorted once at module load — longest keys first so "six runs" beats "six"
 // This avoids re-sorting on every onresult event (was a hidden latency source)
@@ -83,6 +81,7 @@ if (SpeechRecognitionAPI && !isIOS) {
     console.log('Voice: started');
     currentState = STATE.LISTENING;
     pendingStart = false;
+    processedIndices.clear();
   };
 
   recognition.onend = () => {
@@ -101,12 +100,6 @@ if (SpeechRecognitionAPI && !isIOS) {
 
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      // BUGFIX: Only process final results, not interim ones.
-      // On mobile Chrome, interim results fire rapidly for every partial word.
-      // Processing them causes commands to trigger on incomplete speech
-      // (e.g. "si" matching before "six" is fully spoken), and the
-      // processedIndices guard then blocks the final, correct result.
-      // Interim results are still forwarded to the live transcript display.
       const rawTranscript = event.results[i][0].transcript;
 
       // Live transcript display — show interim results for UI feedback
@@ -114,45 +107,62 @@ if (SpeechRecognitionAPI && !isIOS) {
         currentTranscriptCallback(rawTranscript);
       }
 
-      // Skip non-final results for command matching
-      if (!event.results[i].isFinal) continue;
+      // Skip if this result index has already matched a command
+      if (processedIndices.has(i)) continue;
 
       const transcript = normalizeTranscript(rawTranscript);
+      let matchedKey = null;
 
+      // Check all possible commands
       for (const key of sortedCommandKeys) {
-        const regex = new RegExp(`\\b${key}\\b`, 'i');
-        if (regex.test(transcript)) {
-          console.log(`Voice match: "${rawTranscript}" → "${key}"`);
-
-          const shouldRestart = autoRestart;
-          autoRestart = false;
-
-          // Stop mic so TTS doesn't echo into the microphone
-          if (recognition) {
-            try { recognition.stop(); } catch (e) { /* ignore */ }
+        // Non-ASCII characters (Urdu/Hindi script) don't work with \b boundaries in JS regex
+        const hasNonAscii = /[^\x00-\x7F]/.test(key);
+        if (hasNonAscii) {
+          if (transcript.includes(key)) {
+            matchedKey = key;
+            break;
           }
-
-          // SPEED FIX: Fire the score callback immediately — don't wait for TTS.
-          // Then restart the mic after 400ms (enough silence to avoid echo).
-          // TTS plays in the background concurrently — it no longer blocks the mic.
-          // Old behaviour: stop → TTS plays fully (up to 2s) → restart
-          // New behaviour: stop → score registered instantly → restart after 400ms
-          //                TTS plays in parallel during those 400ms
-          if (currentCallback) {
-            currentCallback(COMMANDS[key].runs, COMMANDS[key].type, transcript);
+        } else {
+          // Standard ASCII keys get matched with word boundaries
+          const regex = new RegExp(`\\b${key}\\b`, 'i');
+          if (regex.test(transcript)) {
+            matchedKey = key;
+            break;
           }
-
-          speak(COMMANDS[key].msg); // fire-and-forget, no callback needed
-
-          if (shouldRestart) {
-            setTimeout(() => {
-              autoRestart = true;
-              safeStart();
-            }, 400); // short enough to feel instant, long enough to avoid echo
-          }
-
-          break;
         }
+      }
+
+      if (matchedKey) {
+        console.log(`Voice match: "${rawTranscript}" → "${matchedKey}"`);
+        processedIndices.add(i);
+
+        const shouldRestart = autoRestart;
+        autoRestart = false;
+
+        // Stop mic so TTS doesn't echo into the microphone
+        if (recognition) {
+          try { recognition.stop(); } catch (e) { /* ignore */ }
+        }
+
+        if (currentCallback) {
+          currentCallback(COMMANDS[matchedKey].runs, COMMANDS[matchedKey].type, transcript);
+        }
+
+        speak(COMMANDS[matchedKey].msg); // fire-and-forget, no callback needed
+
+        if (shouldRestart) {
+          setTimeout(() => {
+            autoRestart = true;
+            safeStart();
+          }, 400); // short enough to feel instant, long enough to avoid echo
+        }
+
+        break;
+      }
+
+      // If this index is final and we never matched a command, add to processed to ignore future changes
+      if (event.results[i].isFinal) {
+        processedIndices.add(i);
       }
     }
   };
@@ -296,7 +306,6 @@ const COMMANDS = {
   'wan':           { runs: 1, type: 'normal',  msg: 'Single' },
   'an':            { runs: 1, type: 'normal',  msg: 'Single' },
   'ek':            { runs: 1, type: 'normal',  msg: 'Single' },
-  'run':           { runs: 1, type: 'normal',  msg: 'Single' },
 
   'zero':          { runs: 0, type: 'normal',  msg: 'Dot ball' },
   '0':             { runs: 0, type: 'normal',  msg: 'Dot ball' },
@@ -313,6 +322,42 @@ const COMMANDS = {
 
   'undo':          { runs: 0, type: 'undo',    msg: 'Removing last ball' },
   'back':          { runs: 0, type: 'undo',    msg: 'Removing last ball' },
+
+  // Native Hindi/Urdu script support
+  'चार':           { runs: 4, type: 'normal',  msg: 'Four!' },
+  'चौका':          { runs: 4, type: 'normal',  msg: 'Four!' },
+  'चोका':          { runs: 4, type: 'normal',  msg: 'Four!' },
+  'چار':           { runs: 4, type: 'normal',  msg: 'Four!' },
+  'چوکا':          { runs: 4, type: 'normal',  msg: 'Four!' },
+
+  'छह':            { runs: 6, type: 'normal',  msg: 'Six!' },
+  'छक्का':         { runs: 6, type: 'normal',  msg: 'Six!' },
+  'छका':           { runs: 6, type: 'normal',  msg: 'Six!' },
+  'چھ':            { runs: 6, type: 'normal',  msg: 'Six!' },
+  'چھکا':          { runs: 6, type: 'normal',  msg: 'Six!' },
+
+  'तीन':           { runs: 3, type: 'normal',  msg: 'Three runs' },
+  'تین':           { runs: 3, type: 'normal',  msg: 'Three runs' },
+
+  'दो':            { runs: 2, type: 'normal',  msg: 'Two runs' },
+  'دو':            { runs: 2, type: 'normal',  msg: 'Two runs' },
+
+  'एक':            { runs: 1, type: 'normal',  msg: 'One run' },
+  'ایک':           { runs: 1, type: 'normal',  msg: 'One run' },
+
+  'शून्य':         { runs: 0, type: 'normal',  msg: 'Dot ball' },
+  'صفر':           { runs: 0, type: 'normal',  msg: 'Dot ball' },
+
+  'आउट':           { runs: 0, type: 'wicket',  msg: 'Out!' },
+  'آؤٹ':           { runs: 0, type: 'wicket',  msg: 'Out!' },
+  'विकेट':         { runs: 0, type: 'wicket',  msg: 'Wicket!' },
+  'وکٹ':           { runs: 0, type: 'wicket',  msg: 'Wicket!' },
+
+  'वाइड':          { runs: 0, type: 'wide',    msg: 'Wide' },
+  'وائیڈ':         { runs: 0, type: 'wide',    msg: 'Wide' },
+
+  'नो बॉल':        { runs: 0, type: 'noball',  msg: 'No ball' },
+  'نو بال':        { runs: 0, type: 'noball',  msg: 'No ball' },
 };
 
 // Populate the pre-sorted key list now that COMMANDS exists
@@ -329,6 +374,7 @@ export const startListening = (onCommand, onError, onTranscript) => {
   currentTranscriptCallback = onTranscript;
   autoRestart = true;
   pendingStart = true;
+  processedIndices.clear(); // Clear processed indices for a fresh session
   safeStart();
   return true;
 };
