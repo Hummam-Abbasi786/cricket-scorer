@@ -15,46 +15,59 @@ import { Undo, LogOut, Moon, Sun } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 // Sound effects using Web Audio API
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// BUGFIX: Do NOT create AudioContext at module load time.
+// Mobile browsers (Chrome on Android) require AudioContext to be created
+// inside a user-gesture handler. Creating it at the top level leaves it
+// permanently suspended on mobile, and resume() won't work outside a gesture.
+let audioCtx = null;
+
+const getAudioCtx = () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+};
 
 const playBatHit = () => {
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
+  const ctx = getAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
   osc.type = 'triangle';
-  osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
-  gain.gain.setValueAtTime(1, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+  osc.frequency.setValueAtTime(300, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
+  gain.gain.setValueAtTime(1, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(ctx.destination);
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.15);
+  osc.stop(ctx.currentTime + 0.15);
 };
 
 const playCheer = () => {
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const bufferSize = audioCtx.sampleRate * 2.0; // 2 seconds
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const ctx = getAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+  const bufferSize = ctx.sampleRate * 2.0; // 2 seconds
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < bufferSize; i++) {
     data[i] = Math.random() * 2 - 1;
   }
-  const noise = audioCtx.createBufferSource();
+  const noise = ctx.createBufferSource();
   noise.buffer = buffer;
-  const filter = audioCtx.createBiquadFilter();
+  const filter = ctx.createBiquadFilter();
   filter.type = 'bandpass';
   filter.frequency.value = 1000;
-  const gain = audioCtx.createGain();
+  const gain = ctx.createGain();
   
   // Envelope for cheer
-  gain.gain.setValueAtTime(0, audioCtx.currentTime);
-  gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.3);
-  gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 2.0);
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.3);
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 2.0);
   
   noise.connect(filter);
   filter.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(ctx.destination);
   noise.start();
 };
 

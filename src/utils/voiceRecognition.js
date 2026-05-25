@@ -22,7 +22,9 @@ let currentCallback = null;
 let currentErrorCallback = null;
 let currentTranscriptCallback = null;
 let pendingStart = false;
-let processedIndices = new Set();
+// Note: processedIndices Set removed — it was used to deduplicate interim
+// results, but since we now only process final results (isFinal === true),
+// each index fires exactly once as final and deduplication is unnecessary.
 
 // Pre-sorted once at module load — longest keys first so "six runs" beats "six"
 // This avoids re-sorting on every onresult event (was a hidden latency source)
@@ -81,7 +83,6 @@ if (SpeechRecognitionAPI && !isIOS) {
     console.log('Voice: started');
     currentState = STATE.LISTENING;
     pendingStart = false;
-    processedIndices.clear();
   };
 
   recognition.onend = () => {
@@ -100,21 +101,28 @@ if (SpeechRecognitionAPI && !isIOS) {
 
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
+      // BUGFIX: Only process final results, not interim ones.
+      // On mobile Chrome, interim results fire rapidly for every partial word.
+      // Processing them causes commands to trigger on incomplete speech
+      // (e.g. "si" matching before "six" is fully spoken), and the
+      // processedIndices guard then blocks the final, correct result.
+      // Interim results are still forwarded to the live transcript display.
       const rawTranscript = event.results[i][0].transcript;
-      const transcript = normalizeTranscript(rawTranscript);
 
-      // Live transcript display
+      // Live transcript display — show interim results for UI feedback
       if (currentTranscriptCallback && rawTranscript.trim()) {
         currentTranscriptCallback(rawTranscript);
       }
 
-      if (processedIndices.has(i)) continue;
+      // Skip non-final results for command matching
+      if (!event.results[i].isFinal) continue;
+
+      const transcript = normalizeTranscript(rawTranscript);
 
       for (const key of sortedCommandKeys) {
         const regex = new RegExp(`\\b${key}\\b`, 'i');
         if (regex.test(transcript)) {
           console.log(`Voice match: "${rawTranscript}" → "${key}"`);
-          processedIndices.add(i);
 
           const shouldRestart = autoRestart;
           autoRestart = false;
