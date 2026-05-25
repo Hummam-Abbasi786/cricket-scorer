@@ -106,7 +106,7 @@ const CricketApp = () => {
   const { currentMatch, players, addScore, selectionRequired, startMatch, undo, finishMatch } = useCricket();
   const [selectedFormat, setSelectedFormat] = useState(null);
   const [pendingMatchConfig, setPendingMatchConfig] = useState(null);
-  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'starting' | 'listening'
   const [lastHeard, setLastHeard] = useState('');
   const lastHeardTimeoutRef = React.useRef(null);
 
@@ -127,7 +127,8 @@ const CricketApp = () => {
   });
 
   const handleToggleVoice = () => {
-    if (!voiceActive) {
+    if (voiceState === 'idle') {
+      setVoiceState('starting');
       const started = startListening(
         (runs, type, transcript) => {
           if (handleScoreRef.current) {
@@ -143,27 +144,36 @@ const CricketApp = () => {
           } else if (error === 'not-supported') {
             alert('Voice recognition is not supported in this browser. Please use Chrome on Android and make sure the page is loaded over HTTPS.');
           }
-          setVoiceActive(false);
+          setVoiceState('idle');
         },
         (transcript) => {
           updateLastHeard(transcript);
+        },
+        (state) => {
+          if (state === 'LISTENING') {
+            setVoiceState('listening');
+          } else if (state === 'IDLE') {
+            setVoiceState('idle');
+          } else if (state === 'STARTING') {
+            setVoiceState('starting');
+          }
         }
       );
-      if (started) {
-        setVoiceActive(true);
+      if (!started) {
+        setVoiceState('idle');
       }
     } else {
       stopListening();
-      setVoiceActive(false);
+      setVoiceState('idle');
     }
   };
 
   useEffect(() => {
-    if (voiceActive && selectionRequired) {
+    if (voiceState !== 'idle' && selectionRequired) {
       stopListening();
-      setVoiceActive(false);
+      setVoiceState('idle');
     }
-  }, [voiceActive, selectionRequired]);
+  }, [voiceState, selectionRequired]);
 
   const handleScore = (runs, type, transcript) => {
     if (transcript) {
@@ -256,7 +266,7 @@ const CricketApp = () => {
           </header>
 
           <LiveScoreboard 
-            voiceActive={voiceActive} 
+            voiceState={voiceState} 
             onToggleVoice={handleToggleVoice} 
             lastHeard={lastHeard}
             voiceSupported={isVoiceSupported}

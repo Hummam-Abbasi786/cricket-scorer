@@ -2,10 +2,12 @@ import React from 'react';
 import { useCricket } from '../context/CricketContext';
 import { Mic, MicOff, RotateCcw, TrendingUp, Info, MessageSquare, Activity } from 'lucide-react';
 
-const LiveScoreboard = ({ voiceActive, onToggleVoice, lastHeard, voiceSupported = true }) => {
+const LiveScoreboard = ({ voiceActive, voiceState, onToggleVoice, lastHeard, voiceSupported = true }) => {
   const { currentMatch, undo } = useCricket();
-
+  
   if (!currentMatch) return null;
+
+  const state = voiceState || (voiceActive ? 'listening' : 'idle');
 
   const totalBalls = currentMatch.balls;
   const overs = Math.floor(totalBalls / 6);
@@ -73,31 +75,57 @@ const LiveScoreboard = ({ voiceActive, onToggleVoice, lastHeard, voiceSupported 
         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
           <button 
             onClick={voiceSupported ? onToggleVoice : () => alert('Voice scoring is not available on iPhone/iPad.\n\nPlease use Chrome on Android for voice scoring.')}
-            title={voiceSupported ? (voiceActive ? 'Stop voice scoring' : 'Start voice scoring') : 'Not supported on iOS'}
+            title={
+              !voiceSupported 
+                ? 'Not supported on iOS' 
+                : state === 'listening' 
+                ? 'Stop voice scoring' 
+                : state === 'starting' 
+                ? 'Initializing microphone...' 
+                : 'Start voice scoring'
+            }
             style={{ 
               padding: '0.75rem', 
               borderRadius: '50%', 
-              background: voiceActive ? 'var(--primary)' : 'var(--btn-bg)',
-              color: voiceActive ? 'var(--bg)' : voiceSupported ? 'var(--text)' : 'var(--text-muted)',
+              background: state === 'listening' 
+                ? 'var(--primary)' 
+                : state === 'starting' 
+                ? '#f59e0b' 
+                : 'var(--btn-bg)',
+              color: (state === 'listening' || state === 'starting') 
+                ? 'var(--bg)' 
+                : voiceSupported 
+                ? 'var(--text)' 
+                : 'var(--text-muted)',
               marginBottom: '0.25rem',
-              animation: voiceActive ? 'glow 2s infinite' : 'none',
+              animation: state === 'listening' 
+                ? 'glow 2s infinite' 
+                : state === 'starting' 
+                ? 'connectingPulse 1s infinite' 
+                : 'none',
               opacity: voiceSupported ? 1 : 0.45,
               cursor: voiceSupported ? 'pointer' : 'not-allowed',
             }}
           >
-            {voiceActive ? <Mic size={24} /> : <MicOff size={24} />}
+            {(state === 'listening' || state === 'starting') ? <Mic size={24} /> : <MicOff size={24} />}
           </button>
           
           <div style={{ 
             fontSize: '0.75rem', 
             height: '20px', 
-            color: 'var(--primary)', 
+            color: state === 'starting' ? '#f59e0b' : 'var(--primary)', 
             fontWeight: 600,
-            opacity: lastHeard ? 1 : 0,
+            opacity: (lastHeard || state === 'starting') ? 1 : 0,
             transition: 'opacity 0.3s ease',
-            textShadow: '0 0 10px rgba(242, 108, 35, 0.5)'
+            textShadow: state === 'starting' 
+              ? '0 0 10px rgba(245, 158, 11, 0.5)' 
+              : '0 0 10px rgba(242, 108, 35, 0.5)'
           }}>
-            {lastHeard && `Heard: "${lastHeard}"`}
+            {state === 'starting' 
+              ? 'Wait (Connecting...)' 
+              : lastHeard 
+              ? `Heard: "${lastHeard}"` 
+              : ''}
           </div>
 
           <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>

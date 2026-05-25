@@ -79,9 +79,17 @@ if (SpeechRecognitionAPI && !isIOS) {
 
   recognition.onstart = () => {
     console.log('Voice: started');
+    // Set internal state to LISTENING immediately so onresult works,
+    // but delay the external callback notification by 600ms to allow the Android beep to finish.
     currentState = STATE.LISTENING;
     pendingStart = false;
     processedIndices.clear();
+
+    setTimeout(() => {
+      if (currentState === STATE.LISTENING && currentStateCallback) {
+        currentStateCallback(STATE.LISTENING);
+      }
+    }, 600);
   };
 
   recognition.onend = () => {
